@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Multi-LLM Playground</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="bar">
+    <h1>Multi-LLM Playground</h1>
+  </header>
+
+  <main class="container">
+    <form id="prompt-form" class="prompt">
+      <textarea id="prompt" rows="4" placeholder="Enter your prompt..."></textarea>
+      <div class="actions">
+        <button id="ask" type="submit">Ask all</button>
+        <span id="status" aria-live="polite"></span>
+      </div>
+    </form>
+
+    <section class="grid">
+      <article class="card">
+        <h2>DeepSeek</h2>
+        <div id="out-deepseek" class="output"></div>
+      </article>
+
+      <article class="card">
+        <h2>Gemini</h2>
+        <div id="out-gemini" class="output"></div>
+      </article>
+
+      <article class="card">
+        <h2>ChatGPT</h2>
+        <div id="out-chatgpt" class="output"></div>
+      </article>
+    </section>
+    <section class="history">
+      <h2>Prompt History</h2>
+      <ul id="prompt-history"></ul>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
