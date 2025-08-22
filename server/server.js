@@ -11,16 +11,15 @@ app.use(express.json({ limit: "1mb" }));
 // Serve the static client
 app.use(express.static("../client"));
 
-// Add system prompt here so you can play with it easily
+// system prompt at start of every conversation
 const system_prompt = `
 Stick to less than 150 words.
 Responses must be clearly structured.
-stick to plain text only.
+respond only in plain text.
 Do not use Markdown.
 `;
 
-
-// Helper function: fetch with timeout
+// Helper: fetch with timeout
 async function fetchWithTimeout(url, options = {}, ms = 30000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), ms);
@@ -32,11 +31,9 @@ async function fetchWithTimeout(url, options = {}, ms = 30000) {
   }
 }
 
-async function askOpenAI(userPrompt) {
+async function askOpenAI(conversation) {
   const key = process.env.OPENAI_API_KEY;
   if (!key) return { ok: false, error: "Missing OPENAI_API_KEY" };
-
-  const fullPrompt = `system instructions:\n${system_prompt}\n\nuser prompt:\n${userPrompt}`;
 
   try {
     const res = await fetchWithTimeout("https://api.openai.com/v1/chat/completions", {
@@ -47,7 +44,7 @@ async function askOpenAI(userPrompt) {
       },
       body: JSON.stringify({
         model: "gpt-4o-mini",
-        messages: [{ role: "user", content: fullPrompt }],
+        messages: conversation,
         temperature: 0.7
       })
     });
@@ -64,11 +61,9 @@ async function askOpenAI(userPrompt) {
   }
 }
 
-async function askDeepSeek(userPrompt) {
+async function askDeepSeek(conversation) {
   const key = process.env.DEEPSEEK_API_KEY;
   if (!key) return { ok: false, error: "Missing DEEPSEEK_API_KEY" };
-
-  const fullPrompt = `system instructions:\n${system_prompt}\n\nuser prompt:\n${userPrompt}`;
 
   try {
     const res = await fetchWithTimeout("https://api.deepseek.com/v1/chat/completions", {
@@ -79,7 +74,7 @@ async function askDeepSeek(userPrompt) {
       },
       body: JSON.stringify({
         model: "deepseek-chat",
-        messages: [{ role: "user", content: fullPrompt }],
+        messages: conversation,
         temperature: 0.7
       })
     });
@@ -96,19 +91,25 @@ async function askDeepSeek(userPrompt) {
   }
 }
 
-async function askGemini(userPrompt) {
+async function askGemini(conversation) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return { ok: false, error: "Missing GEMINI_API_KEY" };
 
-  const fullPrompt = `system instructions:\n${system_prompt}\n\nuser prompt:\n${userPrompt}`;
-
   try {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(key)}`;
+    // Convert OpenAI-style conversation to Gemini format
+    const contents = conversation
+      .filter(m => m.role !== "system") // Gemini doesn’t have "system" role
+      .map(m => ({
+        role: m.role === "assistant" ? "model" : "user",
+        parts: [{ text: m.content }]
+      }));
+
     const res = await fetchWithTimeout(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: fullPrompt }] }],
+        contents,
         generationConfig: { temperature: 0.7 }
       })
     });
@@ -127,19 +128,19 @@ async function askGemini(userPrompt) {
 }
 
 app.post("/api/ask", async (req, res) => {
-  const prompt = (req.body?.prompt ?? "").toString().trim();
-  if (!prompt) {
-    return res.status(400).json({ error: "Prompt is required." });
+  const conversation = req.body?.conversation;
+  if (!conversation || !Array.isArray(conversation)) {
+    return res.status(400).json({ error: "Conversation array required." });
   }
 
-  // Kick off all three in parallel
   const [deepseek, gemini, chatgpt] = await Promise.allSettled([
-    askDeepSeek(prompt),
-    askGemini(prompt),
-    askOpenAI(prompt)
+    askDeepSeek(conversation),
+    askGemini(conversation),
+    askOpenAI(conversation)
   ]);
 
-  const unwrap = (r) => (r.status === "fulfilled" ? r.value : { ok: false, error: r.reason?.message ?? "Unknown error" });
+  const unwrap = (r) =>
+    r.status === "fulfilled" ? r.value : { ok: false, error: r.reason?.message ?? "Unknown error" };
 
   res.json({
     deepseek: unwrap(deepseek),

@@ -7,19 +7,45 @@ const outDeepseek = document.getElementById("out-deepseek");
 const outGemini = document.getElementById("out-gemini");
 const outChatgpt = document.getElementById("out-chatgpt");
 
+const historyEl = document.getElementById("prompt-history");
+const newChatBtn = document.getElementById("new-chat");
+
+// conversation memory (per chat)
+let conversation = [
+  {
+    role: "system",
+    content:
+      "Stick to less than 150 words. Responses must be clearly structured. Format the output using plain HTML tags (<p>, <ul>, <li>, <strong>, etc.). Do not use Markdown."
+  }
+];
+
+// helper to update the UI loading state
 function setLoading(isLoading) {
   askBtn.disabled = isLoading;
   statusEl.textContent = isLoading ? "Waiting for all models..." : "";
-  [outDeepseek, outGemini, outChatgpt].forEach(el => {
+  [outDeepseek, outGemini, outChatgpt].forEach((el) => {
     el.textContent = isLoading ? "" : el.textContent;
-    if (isLoading) {
-      el.classList.add("skeleton");
-    } else {
-      el.classList.remove("skeleton");
-    }
+    if (isLoading) el.classList.add("skeleton");
+    else el.classList.remove("skeleton");
   });
 }
 
+// helper to add messages to chat history
+function addToHistory(role, text, model = "") {
+  const li = document.createElement("li");
+  li.classList.add(role);
+  if (role === "assistant") {
+    li.textContent = `${model}: ${text}`;
+  } else {
+    li.textContent = `You: ${text}`;
+  }
+  historyEl.appendChild(li);
+
+  // auto-scroll to newest message
+  historyEl.scrollTop = historyEl.scrollHeight;
+}
+
+// form submission handler
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
   const prompt = textarea.value.trim();
@@ -28,42 +54,69 @@ form.addEventListener("submit", async (e) => {
     return;
   }
 
-  // adding the prompt to history.
-  const li = document.createElement("li");
-  li.textContent = prompt;
-  historyEl.prepend(li);
+  // add user message
+  conversation.push({ role: "user", content: prompt });
+  addToHistory("user", prompt);
 
+  // clear input
   textarea.value = "";
+
   setLoading(true);
 
   try {
     const res = await fetch("/api/ask", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt })
+      body: JSON.stringify({ conversation })
     });
 
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Server error ${res.status}: ${text}`);
-    }
+    if (!res.ok) throw new Error(`Server error ${res.status}`);
+
     const data = await res.json();
 
-    // Fill outputs (success or error per model)
-    const apply = (el, result) => {
-      if (result?.ok) el.innerHTML = result.text || "(empty)";
-      else el.textContent = `⚠️ ${result?.error || "Unknown error"}`;
-    };
+    // ChatGPT
+    if (data.chatgpt.ok) {
+      conversation.push({ role: "assistant", content: data.chatgpt.text });
+      addToHistory("assistant", data.chatgpt.text, "ChatGPT");
+      outChatgpt.innerHTML = data.chatgpt.text;
+    } else {
+      outChatgpt.textContent = `⚠️ ${data.chatgpt.error}`;
+    }
 
-    apply(outDeepseek, data.deepseek);
-    apply(outGemini, data.gemini);
-    apply(outChatgpt, data.chatgpt);
+    // DeepSeek
+    if (data.deepseek.ok) {
+      conversation.push({ role: "assistant", content: data.deepseek.text });
+      addToHistory("assistant", data.deepseek.text, "DeepSeek");
+      outDeepseek.innerHTML = data.deepseek.text;
+    } else {
+      outDeepseek.textContent = `⚠️ ${data.deepseek.error}`;
+    }
+
+    // Gemini
+    if (data.gemini.ok) {
+      conversation.push({ role: "assistant", content: data.gemini.text });
+      addToHistory("assistant", data.gemini.text, "Gemini");
+      outGemini.innerHTML = data.gemini.text;
+    } else {
+      outGemini.textContent = `⚠️ ${data.gemini.error}`;
+    }
   } catch (err) {
-    outDeepseek.textContent = "";
-    outGemini.textContent = "";
-    outChatgpt.textContent = "";
     statusEl.textContent = `Request failed: ${err.message}`;
   } finally {
     setLoading(false);
   }
+});
+
+// new chat resets everything
+newChatBtn.addEventListener("click", () => {
+  conversation = [
+    {
+      role: "system",
+      content:
+        "Stick to less than 150 words. Responses must be clearly structured. Format the output using plain HTML tags (<p>, <ul>, <li>, <strong>, etc.). Do not use Markdown."
+    }
+  ];
+  historyEl.innerHTML = "";
+  [outDeepseek, outGemini, outChatgpt].forEach((el) => (el.textContent = ""));
+  statusEl.textContent = "Started a new chat.";
 });

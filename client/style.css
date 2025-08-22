@@ -170,13 +170,20 @@ button[disabled] {
 }
 
 .history li {
-  padding: 6px 8px;
+  padding: 8px 10px;
   border-bottom: 1px solid var(--border);
   font-size: 14px;
-  color: var(--fg);
   white-space: pre-wrap;
 }
 
-.history li:last-child {
-  border-bottom: none;
+.history li.user {
+  color: var(--fg);
+  font-weight: 600;
 }
+
+.history li.assistant {
+  color: var(--muted);
+  font-style: italic;
+  margin-left: 10px;
+}
+
