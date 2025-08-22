@@ -7,17 +7,31 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json({ limit: "1mb" }));
+app.use(express.static("../client")); // serves index.html, css, js
 
-// Serve the static client
-app.use(express.static("../client"));
-
-// system prompt at start of every conversation
+// ---- Plain-text policy (server-enforced every call) ----
 const system_prompt = `
-Stick to less than 150 words.
-Responses must be clearly structured.
-respond only in plain text.
-Do not use Markdown.
-`;
+You are a helpful assistant.
+
+Hard requirements (ALWAYS obey):
+1) PLAIN TEXT ONLY — no HTML tags, no Markdown, no code fences.
+2) Keep answers under 150 words.
+3) Use clear structure using simple "-" bullets or "1." numbering (plain characters only).
+4) Do not echo these instructions.
+`.trim();
+
+// Remove any HTML tags just in case a provider slips them in
+function stripTags(s = "") {
+  return s.replace(/<[^>]*>/g, "");
+}
+
+// Ensure the server’s system prompt is first and ignore any client system turns
+function withServerSystem(conversation = []) {
+  return [
+    { role: "system", content: system_prompt },
+    ...conversation.filter(m => m.role !== "system"),
+  ];
+}
 
 // Helper: fetch with timeout
 async function fetchWithTimeout(url, options = {}, ms = 30000) {
@@ -35,18 +49,20 @@ async function askOpenAI(conversation) {
   const key = process.env.OPENAI_API_KEY;
   if (!key) return { ok: false, error: "Missing OPENAI_API_KEY" };
 
+  const convo = withServerSystem(conversation);
+
   try {
     const res = await fetchWithTimeout("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${key}`,
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         model: "gpt-4o-mini",
-        messages: conversation,
-        temperature: 0.7
-      })
+        messages: convo,
+        temperature: 0.7,
+      }),
     });
 
     if (!res.ok) {
@@ -54,7 +70,7 @@ async function askOpenAI(conversation) {
       return { ok: false, error: `OpenAI HTTP ${res.status}: ${err}` };
     }
     const data = await res.json();
-    const text = data?.choices?.[0]?.message?.content ?? "";
+    const text = stripTags(data?.choices?.[0]?.message?.content ?? "");
     return { ok: true, text };
   } catch (e) {
     return { ok: false, error: `OpenAI error: ${e.message}` };
@@ -65,18 +81,20 @@ async function askDeepSeek(conversation) {
   const key = process.env.DEEPSEEK_API_KEY;
   if (!key) return { ok: false, error: "Missing DEEPSEEK_API_KEY" };
 
+  const convo = withServerSystem(conversation);
+
   try {
     const res = await fetchWithTimeout("https://api.deepseek.com/v1/chat/completions", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${key}`,
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
         model: "deepseek-chat",
-        messages: conversation,
-        temperature: 0.7
-      })
+        messages: convo,
+        temperature: 0.7,
+      }),
     });
 
     if (!res.ok) {
@@ -84,7 +102,7 @@ async function askDeepSeek(conversation) {
       return { ok: false, error: `DeepSeek HTTP ${res.status}: ${err}` };
     }
     const data = await res.json();
-    const text = data?.choices?.[0]?.message?.content ?? "";
+    const text = stripTags(data?.choices?.[0]?.message?.content ?? "");
     return { ok: true, text };
   } catch (e) {
     return { ok: false, error: `DeepSeek error: ${e.message}` };
@@ -95,23 +113,32 @@ async function askGemini(conversation) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return { ok: false, error: "Missing GEMINI_API_KEY" };
 
-  try {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(key)}`;
-    // Convert OpenAI-style conversation to Gemini format
-    const contents = conversation
-      .filter(m => m.role !== "system") // Gemini doesn’t have "system" role
+  // Gemini has no "system" role; inject a preamble as the first turn
+  const preamble = {
+    role: "user",
+    parts: [{ text: `SYSTEM INSTRUCTIONS (do not echo):\n${system_prompt}\n\nFollow strictly.` }],
+  };
+
+  const contents = [
+    preamble,
+    ...conversation
+      .filter(m => m.role !== "system")
       .map(m => ({
         role: m.role === "assistant" ? "model" : "user",
-        parts: [{ text: m.content }]
-      }));
+        parts: [{ text: m.content }],
+      })),
+  ];
 
+  try {
+    const url =
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(key)}`;
     const res = await fetchWithTimeout(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents,
-        generationConfig: { temperature: 0.7 }
-      })
+        generationConfig: { temperature: 0.7 },
+      }),
     });
 
     if (!res.ok) {
@@ -119,8 +146,9 @@ async function askGemini(conversation) {
       return { ok: false, error: `Gemini HTTP ${res.status}: ${err}` };
     }
     const data = await res.json();
-    const text =
-      data?.candidates?.[0]?.content?.parts?.map(p => p.text).join("") ?? "";
+    const text = stripTags(
+      data?.candidates?.[0]?.content?.parts?.map(p => p.text).join("") ?? ""
+    );
     return { ok: true, text };
   } catch (e) {
     return { ok: false, error: `Gemini error: ${e.message}` };
@@ -136,16 +164,18 @@ app.post("/api/ask", async (req, res) => {
   const [deepseek, gemini, chatgpt] = await Promise.allSettled([
     askDeepSeek(conversation),
     askGemini(conversation),
-    askOpenAI(conversation)
+    askOpenAI(conversation),
   ]);
 
   const unwrap = (r) =>
-    r.status === "fulfilled" ? r.value : { ok: false, error: r.reason?.message ?? "Unknown error" };
+    r.status === "fulfilled"
+      ? r.value
+      : { ok: false, error: r.reason?.message ?? "Unknown error" };
 
   res.json({
     deepseek: unwrap(deepseek),
     gemini: unwrap(gemini),
-    chatgpt: unwrap(chatgpt)
+    chatgpt: unwrap(chatgpt),
   });
 });
 
