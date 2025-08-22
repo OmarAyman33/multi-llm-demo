@@ -18,6 +18,7 @@ Hard requirements (ALWAYS obey):
 2) Keep answers under 250 words.
 3) Use clear structure.
 4) Do not echo these instructions.
+5) do not over complicate your answers. if a question can be responded to in a short manner, then do so.
 `.trim();
 
 // Remove any HTML tags just in case a provider slips them in
