@@ -15,8 +15,8 @@ You are a helpful assistant.
 
 Hard requirements (ALWAYS obey):
 1) PLAIN TEXT ONLY — no HTML tags, no Markdown, no code fences.
-2) Keep answers under 150 words.
-3) Use clear structure using simple "-" bullets or "1." numbering (plain characters only).
+2) Keep answers under 250 words.
+3) Use clear structure.
 4) Do not echo these instructions.
 `.trim();
 
