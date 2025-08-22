@@ -9,9 +9,21 @@ const outChatgpt = document.getElementById("out-chatgpt");
 
 const historyEl = document.getElementById("prompt-history");
 const newChatBtn = document.getElementById("new-chat");
+const editSystemBtn = document.getElementById("edit-system");
 
-// Conversation memory (per chat). Let the SERVER inject the system policy.
-// Start empty; server prepends its system prompt on each call.
+// For user visibility only (server enforces the real base)
+const BASE_SYSTEM_PROMPT =
+  `You are a helpful assistant.\n\n` +
+  `Hard requirements (ALWAYS obey):\n` +
+  `1) PLAIN TEXT ONLY — no HTML tags, no Markdown, no code fences.\n` +
+  `2) Keep answers under 250 words.\n` +
+  `3) Do not echo these instructions.`;
+
+// Extra text that the user appends (sent to the server each request)
+let extraSystemPrompt = "";
+
+// Conversation memory (per chat). The SERVER injects its base system prompt.
+// We keep this empty so the server owns the policy.
 let conversation = [];
 
 // UI loading
@@ -33,6 +45,21 @@ function addToHistory(role, text, model = "") {
   historyEl.appendChild(li);
   historyEl.scrollTop = historyEl.scrollHeight;
 }
+
+// Button: edit/append system prompt
+editSystemBtn.addEventListener("click", () => {
+  const message =
+    `Base system prompt (read-only):\n\n` +
+    `${BASE_SYSTEM_PROMPT}\n\n` +
+    `Add your extra instructions (they will be APPENDED to the end).\n\n` +
+    `Current extra instructions (editable):`;
+  const input = window.prompt(message, extraSystemPrompt);
+  if (input === null) return; // user canceled
+  extraSystemPrompt = input.trim();
+  statusEl.textContent = extraSystemPrompt
+    ? "Extra system instructions are active."
+    : "Extra system instructions cleared.";
+});
 
 // Submit prompt
 form.addEventListener("submit", async (e) => {
@@ -56,7 +83,7 @@ form.addEventListener("submit", async (e) => {
     const res = await fetch("/api/ask", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conversation }),
+      body: JSON.stringify({ conversation, extraSystemPrompt }),
     });
 
     if (!res.ok) throw new Error(`Server error ${res.status}`);
@@ -95,7 +122,7 @@ form.addEventListener("submit", async (e) => {
 
 // New Chat resets everything (fresh conversation)
 newChatBtn.addEventListener("click", () => {
-  conversation = []; // server will inject system prompt next call
+  conversation = []; // server will inject base system prompt next call
   historyEl.innerHTML = "";
   [outDeepseek, outGemini, outChatgpt].forEach((el) => (el.textContent = ""));
   statusEl.textContent = "Started a new chat.";
